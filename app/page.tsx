@@ -1,3 +1,4 @@
+"use client";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -7,8 +8,63 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { trpc } from "@/trpc/react";
+import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import CollectionForm from "@/components/forms";
+
+interface Collection {
+  id: number;
+  name: string;
+  description: string | null;
+  userId: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 export default function Home() {
+  const fetchStatus = trpc.listDevices.useQuery();
+  const utils = trpc.useUtils();
+
+  const handleCheckCamera = () => {
+    const checkDevicesPromise = utils.listDevices
+      .fetch()
+      .then((result: any) => {
+        if (result.success) {
+          return {
+            deviceCount: result.devices?.length || 0,
+            message: result.message,
+            devices: result.devices,
+          };
+        } else {
+          throw new Error(result.error || "Failed to check devices");
+        }
+      });
+
+    toast.promise(checkDevicesPromise, {
+      loading: "Checking for DV cameras...",
+      success: (data) => {
+        if (data.deviceCount > 0) {
+          return `Found ${data.deviceCount} device(s): ${data.devices?.join(
+            ", "
+          )}`;
+        } else {
+          return "No DV cameras found - check connection";
+        }
+      },
+      error: (error) => `Error checking cameras: ${error.message}`,
+    });
+  };
+
+  const fetchedCollections = trpc.fetchCollections.useQuery();
+
   return (
     <div className="min-h-screen p-4 sm:p-6 lg:p-8 font-[family-name:var(--font-geist-sans)]">
       <main className="flex flex-col gap-8 w-full max-w-7xl mx-auto">
@@ -20,11 +76,12 @@ export default function Home() {
         </div>
 
         <Tabs defaultValue="dashboard" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="gallery">Gallery</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
             <TabsTrigger value="about">About</TabsTrigger>
+            <TabsTrigger value="test">tRPC Test</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="mt-6">
@@ -39,19 +96,34 @@ export default function Home() {
                   </CardDescription>
                 </CardContent>
               </Card>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Card className="hover:shadow-lg transition-all cursor-pointer group">
+                    <CardContent className="p-6">
+                      <CardTitle className="text-lg mb-2">
+                        Create Collection
+                      </CardTitle>
+                      <CardDescription>
+                        Organize dv clips into collections
+                      </CardDescription>
+                    </CardContent>
+                  </Card>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Create new collection</DialogTitle>
+                    <DialogDescription>
+                      Create a new collection (folder) to organise dv tapes
+                    </DialogDescription>
+                  </DialogHeader>
+                  <CollectionForm />
+                </DialogContent>
+              </Dialog>
 
-              <Card className="hover:shadow-lg transition-all cursor-pointer group">
-                <CardContent className="p-6">
-                  <CardTitle className="text-lg mb-2">
-                    Create Collection
-                  </CardTitle>
-                  <CardDescription>
-                    Organize dv clips into collections
-                  </CardDescription>
-                </CardContent>
-              </Card>
-
-              <Card className="hover:shadow-lg transition-all cursor-pointer group">
+              <Card
+                className="hover:shadow-lg transition-all cursor-pointer group"
+                onClick={handleCheckCamera}
+              >
                 <CardContent className="p-6">
                   <CardTitle className="text-lg mb-2">Check Camera</CardTitle>
                   <CardDescription>
@@ -59,28 +131,42 @@ export default function Home() {
                   </CardDescription>
                 </CardContent>
               </Card>
+              <div>
+                <h1>Recently made collections</h1>
+                {fetchedCollections.data?.collections?.map(
+                  (collection: Collection) => (
+                    <Card key={collection.id}>
+                      <CardContent>
+                        <CardTitle>{collection.name}</CardTitle>
+                        <CardDescription>
+                          {collection.description || "No description"}
+                        </CardDescription>
+                      </CardContent>
+                    </Card>
+                  )
+                ) || <p className="text-gray-400">No collections found</p>}
+              </div>
             </div>
           </TabsContent>
 
           <TabsContent value="gallery" className="mt-6">
             <div className="rounded-lg border p-6">
-              <h3 className="text-xl font-semibold mb-4">Media Gallery</h3>
+              <h3 className="text-xl font-semibold mb-4">Tape Gallery</h3>
               <p className="text-gray-600 mb-4">
                 View and manage your captured photos and videos.
               </p>
               <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map(
-                  (item) => (
+                {fetchedCollections.data?.success &&
+                  fetchedCollections.data?.collections?.map((item) => (
                     <div
-                      key={item}
+                      key={item.id}
                       className="bg-gray-100 rounded-lg aspect-square flex items-center justify-center hover:bg-gray-200 transition-colors cursor-pointer"
                     >
                       <span className="text-gray-500 text-sm">
-                        Media {item}
+                        {item.name || item.id}
                       </span>
                     </div>
-                  )
-                )}
+                  ))}
               </div>
             </div>
           </TabsContent>
@@ -142,6 +228,8 @@ export default function Home() {
               </div>
             </div>
           </TabsContent>
+
+          <TabsContent value="test" className="mt-6"></TabsContent>
         </Tabs>
       </main>
     </div>
