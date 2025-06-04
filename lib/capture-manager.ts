@@ -15,12 +15,12 @@ interface IDVEmulator {
 // Import the server-side emulator only
 let DVEmulator: { getInstance(): IDVEmulator } | null = null;
 try {
-  if (typeof window === "undefined") {
-    const emulatorModule = require("./dv-emulator.server");
+  if (typeof window === 'undefined') {
+    const emulatorModule = require('./dv-emulator.server');
     DVEmulator = emulatorModule.DVEmulator;
   }
 } catch (error) {
-  console.warn("Failed to load DV emulator:", error);
+  console.warn('Failed to load DV emulator:', error);
 }
 
 export interface CaptureJob {
@@ -60,7 +60,7 @@ class CaptureManager extends EventEmitter {
   private async loadJobsFromDatabase(): Promise<void> {
     try {
       const dbJobs = await db.select().from(captureJobs);
-
+      
       for (const dbJob of dbJobs) {
         const job: CaptureJob = {
           id: dbJob.id,
@@ -73,9 +73,9 @@ class CaptureManager extends EventEmitter {
           error: dbJob.error || undefined,
           outputPath: dbJob.outputPath || undefined,
         };
-
+        
         this.jobs.set(job.id, job);
-
+        
         // If job was running when server stopped, mark it as failed
         if (job.status === "starting" || job.status === "running") {
           job.status = "failed";
@@ -84,7 +84,7 @@ class CaptureManager extends EventEmitter {
           await this.updateJobInDatabase(job);
         }
       }
-
+      
       console.log(`Loaded ${dbJobs.length} capture jobs from database`);
     } catch (error) {
       console.error("Failed to load jobs from database:", error);
@@ -111,8 +111,7 @@ class CaptureManager extends EventEmitter {
 
   private async updateJobInDatabase(job: CaptureJob): Promise<void> {
     try {
-      await db
-        .update(captureJobs)
+      await db.update(captureJobs)
         .set({
           status: job.status,
           endTime: job.endTime || null,
@@ -132,39 +131,31 @@ class CaptureManager extends EventEmitter {
    */
   private async checkRealDevices(): Promise<boolean> {
     return new Promise((resolve) => {
-      exec(
-        "dvrescue --status",
-        { timeout: 5000 },
-        (error: any, stdout: any, stderr: any) => {
-          if (error) {
-            console.log("No real DV devices available, using emulator");
-            resolve(false);
-            return;
-          }
-
-          const output = stdout.trim();
-          const hasDevices =
-            output !== "" &&
-            !output.includes("device not found") &&
-            !output.includes("No devices") &&
-            !output.includes("command not found");
-
-          if (hasDevices) {
-            console.log("Real DV devices detected");
-          } else {
-            console.log("No real DV devices available, using emulator");
-          }
-
-          resolve(hasDevices);
+      exec('dvrescue --status', { timeout: 5000 }, (error: any, stdout: any, stderr: any) => {
+        if (error) {
+          console.log('No real DV devices available, using emulator');
+          resolve(false);
+          return;
         }
-      );
+        
+        const output = stdout.trim();
+        const hasDevices = output !== "" && 
+                          !output.includes("device not found") && 
+                          !output.includes("No devices") &&
+                          !output.includes("command not found");
+        
+        if (hasDevices) {
+          console.log('Real DV devices detected');
+        } else {
+          console.log('No real DV devices available, using emulator');
+        }
+        
+        resolve(hasDevices);
+      });
     });
   }
 
-  async startCapture(
-    collectionId: number,
-    collectionName: string
-  ): Promise<string> {
+  async startCapture(collectionId: number, collectionName: string): Promise<string> {
     const jobId = this.generateJobId();
     const foldername = collectionName.replace(/\s+/g, "-").toLowerCase();
     const baseDir = path.join(process.cwd(), "collections", foldername);
@@ -188,18 +179,18 @@ class CaptureManager extends EventEmitter {
     try {
       // Check if real devices are available
       const hasRealDevices = await this.checkRealDevices();
-
+      
       let captureProcess: ChildProcess;
-      if (hasRealDevices) {
+        if (hasRealDevices) {
         // Use real dvrescue
         console.log(`Starting real DV capture for job ${jobId}`);
-        captureProcess = spawn(
-          "dvrescue",
-          ["--capture", outputPath, "--verbose"],
-          {
-            stdio: ["pipe", "pipe", "pipe"],
-          }
-        );
+        captureProcess = spawn("dvrescue", [
+          "--capture",
+          outputPath,
+          "--verbose"
+        ], {
+          stdio: ["pipe", "pipe", "pipe"],
+        });
       } else if (this.dvEmulator) {
         // Use emulator
         console.log(`Starting emulated DV capture for job ${jobId}`);
@@ -250,9 +241,7 @@ class CaptureManager extends EventEmitter {
         await this.updateJobInDatabase(currentJob); // Update database
         this.emit("jobStatusChanged", currentJob);
 
-        console.log(
-          `Capture job ${jobId} finished with status: ${currentJob.status}`
-        );
+        console.log(`Capture job ${jobId} finished with status: ${currentJob.status}`);
         if (currentJob.status === "completed") {
           console.log(`Output saved to: ${outputPath}`);
         }
@@ -267,11 +256,11 @@ class CaptureManager extends EventEmitter {
         currentJob.error = `Failed to start process: ${error.message}`;
         currentJob.endTime = new Date();
         this.processes.delete(jobId);
-
+        
         this.jobs.set(jobId, currentJob);
         await this.updateJobInDatabase(currentJob); // Update database
         this.emit("jobStatusChanged", currentJob);
-
+        
         console.error(`Capture job ${jobId} failed to start:`, error);
       });
 
@@ -290,6 +279,7 @@ class CaptureManager extends EventEmitter {
 
       this.emit("jobStatusChanged", job);
       return jobId;
+
     } catch (error) {
       job.status = "failed";
       job.error = `Failed to initialize capture: ${error}`;
@@ -311,14 +301,14 @@ class CaptureManager extends EventEmitter {
 
   getJobsByCollection(collectionId: number): CaptureJob[] {
     return Array.from(this.jobs.values()).filter(
-      (job) => job.collectionId === collectionId
+      job => job.collectionId === collectionId
     );
   }
 
   async cancelJob(jobId: string): Promise<boolean> {
     const job = this.jobs.get(jobId);
     const process = this.processes.get(jobId);
-
+    
     if (!job || !process) {
       return false;
     }
@@ -326,7 +316,7 @@ class CaptureManager extends EventEmitter {
     try {
       // Try graceful termination first
       process.kill("SIGTERM");
-
+      
       // Force kill after 5 seconds if still running
       setTimeout(() => {
         if (process && !process.killed) {
@@ -366,11 +356,11 @@ class CaptureManager extends EventEmitter {
   async cleanupOldJobs(maxAge: number = 24 * 60 * 60 * 1000): Promise<void> {
     const now = Date.now();
     const jobsToDelete: string[] = [];
-
+    
     for (const [jobId, job] of this.jobs.entries()) {
       if (
-        job.status === "completed" ||
-        job.status === "failed" ||
+        job.status === "completed" || 
+        job.status === "failed" || 
         job.status === "cancelled"
       ) {
         const jobAge = now - job.startTime.getTime();
@@ -388,7 +378,9 @@ class CaptureManager extends EventEmitter {
     // Remove from database
     if (jobsToDelete.length > 0) {
       try {
-        await db.delete(captureJobs).where(eq(captureJobs.id, jobsToDelete[0]));
+        await db.delete(captureJobs).where(
+          eq(captureJobs.id, jobsToDelete[0])
+        );
         console.log(`Cleaned up ${jobsToDelete.length} old jobs`);
       } catch (error) {
         console.error("Failed to cleanup old jobs from database:", error);

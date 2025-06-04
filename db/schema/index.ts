@@ -48,9 +48,7 @@ export const tags = pgTable("tags", {
 
 export const captureJobs = pgTable("capture_jobs", {
   id: varchar("id", { length: 255 }).primaryKey(), // UUID-like string
-  collectionId: integer("collection_id")
-    .references(() => collections.id)
-    .notNull(),
+  collectionId: integer("collection_id").references(() => collections.id).notNull(),
   collectionName: varchar("collection_name", { length: 255 }).notNull(),
   status: varchar("status", { length: 20 }).notNull(), // starting, running, completed, failed, cancelled
   startTime: timestamp("start_time").notNull(),
