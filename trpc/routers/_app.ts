@@ -5,125 +5,9 @@ import { tags, collections } from "@/db/schema";
 import fs from "fs/promises";
 import path from "path";
 import { eq } from "drizzle-orm";
-import { captureManager } from "@/lib/capture-manager";
+import { jobRouter } from "./job";
 
-// Import server-side emulator
-let DVEmulator: any = null;
-try {
-  DVEmulator = require("@/lib/dv-emulator.server").DVEmulator;
-} catch (error) {
-  console.warn('Failed to load DV emulator:', error);
-}
 export const appRouter = createTRPCRouter({
-  listDevices: baseProcedure.query(async ({ ctx }) => {
-    const command = "dvrescue --status";
-
-    return new Promise((resolve) => {      exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`Error: ${error.message}`);
-          // Fallback to emulator
-          if (DVEmulator) {
-            const emulator = DVEmulator.getInstance();
-            emulator.listDevices().then((result: any) => {
-              resolve({
-                success: result.success,
-                devices: result.devices || [],
-                message: result.message + " (Using emulator)",
-                isEmulated: true
-              });
-            });
-          } else {
-            resolve({
-              success: false,
-              devices: [],
-              message: "No DV devices found and emulator not available",
-              isEmulated: false
-            });
-          }
-          return;
-        }        if (stderr) {
-          console.error(`stderr: ${stderr}`);
-          // Fallback to emulator
-          if (DVEmulator) {
-            const emulator = DVEmulator.getInstance();
-            emulator.listDevices().then((result: any) => {
-              resolve({
-                success: result.success,
-                devices: result.devices || [],
-                message: result.message + " (Using emulator)",
-                isEmulated: true
-              });
-            });
-          } else {
-            resolve({
-              success: false,
-              devices: [],
-              message: "No DV devices found and emulator not available",
-              isEmulated: false
-            });
-          }
-          return;
-        }
-
-        console.log(`stdout: ${stdout}`);
-
-        try {
-          const output = stdout.trim();          if (
-            output === "" ||
-            output.includes("device not found") ||
-            output.includes("No devices")
-          ) {
-            // No real devices, use emulator
-            if (DVEmulator) {
-              const emulator = DVEmulator.getInstance();
-              emulator.listDevices().then((result: any) => {
-                resolve({
-                  success: result.success,
-                  devices: result.devices || [],
-                  message: result.message + " (Using emulator)",
-                  isEmulated: true
-                });
-              });
-            } else {
-              resolve({
-                success: false,
-                devices: [],
-                message: "No DV devices found and emulator not available",
-                isEmulated: false
-              });
-            }
-          } else {
-            resolve({
-              success: true,
-              message: "Real DV devices found",
-              devices: output.split("\n").filter((line) => line.trim() !== ""),
-              rawOutput: output,
-              isEmulated: false
-            });
-          }        } catch (parseError) {
-          // Fallback to emulator on parse error
-          if (DVEmulator) {
-            const emulator = DVEmulator.getInstance();
-            emulator.listDevices().then((result: any) => {
-              resolve({
-                success: result.success,
-                devices: result.devices || [],
-                message: result.message + " (Using emulator - parse error)",
-                isEmulated: true
-              });
-            });
-          } else {
-            resolve({
-              success: false,
-              devices: [],
-              message: "Parse error and emulator not available",
-              isEmulated: false
-            });
-          }
-        }
-      });
-    });
-  }),
   newCollection: baseProcedure
     .input(
       z.object({
@@ -164,7 +48,6 @@ export const appRouter = createTRPCRouter({
     }),
   fetchCollections: baseProcedure.query(async ({ ctx }) => {
     const { db } = ctx;
-
     try {
       const collectionsList = await db.select().from(collections);
       return {
@@ -178,148 +61,76 @@ export const appRouter = createTRPCRouter({
         error: "Failed to fetch collections",
       };
     }
-  }),  startCapture: baseProcedure
+  }),
+  CollectionInfo: baseProcedure
     .input(
       z.object({
-        collectionId: z.number().int().positive(),
+        collectionId: z.number().min(1, "Collection ID is required"),
       })
     )
-    .mutation(async ({ ctx, input }) => {
+    .query(async ({ ctx, input }) => {
       const { db } = ctx;
       const { collectionId } = input;
-      
-      try {
-        const collection = await db
-          .select()
-          .from(collections)
-          .where(eq(collections.id, collectionId))
-          .limit(1)
-          .then((rows) => rows[0]);
 
-        if (!collection) {
-          return {
-            success: false,
-            error: "Collection not found",
-          };
+      const collectionInfoArr = await db
+        .select()
+        .from(collections)
+        .where(eq(collections.id, collectionId));
+
+      const collectionInfo = collectionInfoArr[0];
+
+      if (!collectionInfo) {
+        throw new Error("Collection not found");
+      }
+
+      return {
+        success: true,
+        collection: collectionInfo,
+      };
+    }),
+  checkStatus: baseProcedure.query(async () => {
+    return new Promise<{
+      success: boolean;
+      error?: string;
+      stderr?: string;
+      message?: string;
+      stdout?: string;
+    }>((resolve) => {
+      const timeout = setTimeout(() => {
+        resolve({
+          success: false,
+          error: "Command timed out",
+          stderr: "dvgrab command did not complete within 5 seconds",
+        });
+      }, 5000);
+
+      const command = exec("dvgrab", (error, stdout, stderr) => {
+        clearTimeout(timeout);
+        if (error) {
+          if (stderr.includes("dvgrab") || stdout.includes("dvgrab")) {
+            resolve({
+              success: true,
+              message: "dvgrab is available",
+              stdout: stdout,
+            });
+          } else {
+            resolve({
+              success: false,
+              error: error.message,
+              stderr: stderr,
+            });
+          }
+        } else {
+          resolve({
+            success: true,
+            message: "dvgrab is available",
+            stdout: stdout,
+          });
         }
-
-        const jobId = await captureManager.startCapture(collection.id, collection.name);
-
-        return {
-          success: true,
-          message: "Capture started successfully",
-          jobId,
-        };
-      } catch (error) {
-        console.error("Failed to start capture:", error);
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : "Failed to start capture",
-        };
-      }
-    }),
-
-  getJobStatus: baseProcedure
-    .input(
-      z.object({
-        jobId: z.string(),
-      })
-    )
-    .query(({ input }) => {
-      const { jobId } = input;
-      const job = captureManager.getJob(jobId);
-      
-      if (!job) {
-        return {
-          success: false,
-          error: "Job not found",
-        };
-      }
-
-      return {
-        success: true,
-        job: {
-          id: job.id,
-          collectionId: job.collectionId,
-          collectionName: job.collectionName,
-          status: job.status,
-          startTime: job.startTime,
-          endTime: job.endTime,
-          progress: job.progress,
-          error: job.error,
-          outputPath: job.outputPath,
-        },
-      };
-    }),
-
-  getAllJobs: baseProcedure.query(() => {
-    const jobs = captureManager.getAllJobs();
-    
-    return {
-      success: true,
-      jobs: jobs.map(job => ({
-        id: job.id,
-        collectionId: job.collectionId,
-        collectionName: job.collectionName,
-        status: job.status,
-        startTime: job.startTime,
-        endTime: job.endTime,
-        progress: job.progress,
-        error: job.error,
-        outputPath: job.outputPath,
-      })),
-    };
+      });
+    });
   }),
-
-  getJobsByCollection: baseProcedure
-    .input(
-      z.object({
-        collectionId: z.number().int().positive(),
-      })
-    )
-    .query(({ input }) => {
-      const { collectionId } = input;
-      const jobs = captureManager.getJobsByCollection(collectionId);
-      
-      return {
-        success: true,
-        jobs: jobs.map(job => ({
-          id: job.id,
-          collectionId: job.collectionId,
-          collectionName: job.collectionName,
-          status: job.status,
-          startTime: job.startTime,
-          endTime: job.endTime,
-          progress: job.progress,
-          error: job.error,
-          outputPath: job.outputPath,
-        })),
-      };
-    }),
-
-  cancelCapture: baseProcedure
-    .input(
-      z.object({
-        jobId: z.string(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const { jobId } = input;
-      
-      const success = await captureManager.cancelJob(jobId);
-      
-      if (success) {
-        return {
-          success: true,
-          message: "Capture cancelled successfully",
-        };
-      } else {
-        return {
-          success: false,
-          error: "Failed to cancel capture or job not found",
-        };
-      }
-    }),
+  jobRouter: jobRouter,
 });
 
 export type AppRouter = typeof appRouter;
